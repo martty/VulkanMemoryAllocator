@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1275,7 +1275,15 @@ static void InitializeApplication()
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "Adam Sawicki Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = GetVulkanApiVersion();
+#if VMA_VULKAN_VERSION == 1002000
+    appInfo.apiVersion = VK_API_VERSION_1_2;
+#elif VMA_VULKAN_VERSION == 1001000
+    appInfo.apiVersion = VK_API_VERSION_1_1;
+#elif VMA_VULKAN_VERSION == 1000000
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+#else
+    #error Invalid VMA_VULKAN_VERSION.
+#endif
 
     VkInstanceCreateInfo instInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     instInfo.pApplicationInfo = &appInfo;
@@ -1482,6 +1490,12 @@ static void InitializeApplication()
         ++queueCount;
     }
 
+    VkPhysicalDeviceFeatures deviceFeatures = {};
+    //deviceFeatures.fillModeNonSolid = VK_TRUE;
+    deviceFeatures.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.sparseBinding = g_SparseBindingEnabled ? VK_TRUE : VK_FALSE;
+
+    // Determine list of device extensions to enable.
     std::vector<const char*> enabledDeviceExtensions;
     enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     if(VK_KHR_get_memory_requirements2_enabled)
@@ -1499,9 +1513,10 @@ static void InitializeApplication()
     if(VK_EXT_buffer_device_address_enabled)
         enabledDeviceExtensions.push_back(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
 
-    VkPhysicalDeviceFeatures2 deviceFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-    deviceFeatures.features.samplerAnisotropy = VK_TRUE;
-    deviceFeatures.features.sparseBinding = g_SparseBindingEnabled ? VK_TRUE : VK_FALSE;
+        if(propertyCount)
+        {
+            std::vector<VkExtensionProperties> properties{propertyCount};
+            ERR_GUARD_VULKAN( vkEnumerateDeviceExtensionProperties(g_hPhysicalDevice, nullptr, &propertyCount, properties.data()) );
 
     if(VK_AMD_device_coherent_memory_enabled)
     {
@@ -1516,13 +1531,13 @@ static void InitializeApplication()
     }
 
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-    deviceCreateInfo.pNext = &deviceFeatures;
     deviceCreateInfo.enabledLayerCount = 0;
     deviceCreateInfo.ppEnabledLayerNames = nullptr;
     deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledDeviceExtensions.size();
     deviceCreateInfo.ppEnabledExtensionNames = !enabledDeviceExtensions.empty() ? enabledDeviceExtensions.data() : nullptr;
     deviceCreateInfo.queueCreateInfoCount = queueCount;
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfo;
+    deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
     ERR_GUARD_VULKAN( vkCreateDevice(g_hPhysicalDevice, &deviceCreateInfo, g_Allocs, &g_hDevice) );
 
@@ -1574,7 +1589,48 @@ static void InitializeApplication()
     // Create memory allocator
 
     VmaAllocatorCreateInfo allocatorInfo = {};
-    SetAllocatorCreateInfo(allocatorInfo);
+    allocatorInfo.physicalDevice = g_hPhysicalDevice;
+    allocatorInfo.device = g_hDevice;
+    allocatorInfo.instance = g_hVulkanInstance;
+    allocatorInfo.vulkanApiVersion = appInfo.apiVersion;
+
+    if(VK_KHR_dedicated_allocation_enabled)
+    {
+        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
+    }
+    if(VK_KHR_bind_memory2_enabled)
+    {
+        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT;
+    }
+#if !defined(VMA_MEMORY_BUDGET) || VMA_MEMORY_BUDGET == 1
+    if(VK_EXT_memory_budget_enabled && VK_KHR_get_physical_device_properties2_enabled)
+    {
+        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+    }
+#endif
+
+    if(USE_CUSTOM_CPU_ALLOCATION_CALLBACKS)
+    {
+        allocatorInfo.pAllocationCallbacks = &g_CpuAllocationCallbacks;
+    }
+
+    // Uncomment to enable recording to CSV file.
+    /*
+    {
+        VmaRecordSettings recordSettings = {};
+        recordSettings.pFilePath = "VulkanSample.csv";
+        allocatorInfo.pRecordSettings = &recordSettings;
+    }
+    */
+
+    // Uncomment to enable HeapSizeLimit.
+    /*
+    std::array<VkDeviceSize, VK_MAX_MEMORY_HEAPS> heapSizeLimit;
+    std::fill(heapSizeLimit.begin(), heapSizeLimit.end(), VK_WHOLE_SIZE);
+    heapSizeLimit[0] = 512ull * 1024 * 1024;
+    allocatorInfo.pHeapSizeLimit = heapSizeLimit.data();
+    */
+
     ERR_GUARD_VULKAN( vmaCreateAllocator(&allocatorInfo, &g_hAllocator) );
 
     PrintEnabledFeatures();
