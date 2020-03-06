@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,13 +53,7 @@ bool VK_KHR_dedicated_allocation_enabled = false;
 bool VK_KHR_bind_memory2_enabled = false;
 bool VK_EXT_memory_budget_enabled = false;
 bool VK_AMD_device_coherent_memory_enabled = false;
-bool VK_EXT_buffer_device_address_enabled = false;
-bool VK_KHR_buffer_device_address_enabled = false;
 bool g_SparseBindingEnabled = false;
-bool g_BufferDeviceAddressEnabled = false;
-
-// # Pointers to functions from extensions
-PFN_vkGetBufferDeviceAddressEXT g_vkGetBufferDeviceAddressEXT;
 
 static HINSTANCE g_hAppInstance;
 static HWND g_hWnd;
@@ -600,13 +594,16 @@ static void RegisterDebugCallbacks()
     assert(g_pvkDebugReportMessageEXT);
     assert(g_pvkDestroyDebugReportCallbackEXT);
 
-    VkDebugReportCallbackCreateInfoEXT callbackCreateInfo = { VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT };
+    VkDebugReportCallbackCreateInfoEXT callbackCreateInfo;
+    callbackCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
+    callbackCreateInfo.pNext = nullptr;
     callbackCreateInfo.flags = //VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
         VK_DEBUG_REPORT_ERROR_BIT_EXT |
         VK_DEBUG_REPORT_WARNING_BIT_EXT |
         VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT /*|
         VK_DEBUG_REPORT_DEBUG_BIT_EXT*/;
     callbackCreateInfo.pfnCallback = &MyDebugReportCallback;
+    callbackCreateInfo.pUserData   = nullptr;
 
     ERR_GUARD_VULKAN( g_pvkCreateDebugReportCallbackEXT(g_hVulkanInstance, &callbackCreateInfo, g_Allocs, &g_hCallback) );
 }
@@ -1135,20 +1132,17 @@ static constexpr uint32_t GetVulkanApiVersion()
 
 static void PrintEnabledFeatures()
 {
-    wprintf(L"Validation layer: %d\n", g_EnableValidationLayer ? 1 : 0);
-    wprintf(L"Sparse binding: %d\n", g_SparseBindingEnabled ? 1 : 0);
-    wprintf(L"Buffer device address: %d\n", g_BufferDeviceAddressEnabled ? 1 : 0);
+    printf("Validation layer: %d\n", g_EnableValidationLayer ? 1 : 0);
+    printf("Sparse binding: %d\n", g_SparseBindingEnabled ? 1 : 0);
     if(GetVulkanApiVersion() == VK_API_VERSION_1_0)
     {
-        wprintf(L"VK_KHR_get_memory_requirements2: %d\n", VK_KHR_get_memory_requirements2_enabled ? 1 : 0);
-        wprintf(L"VK_KHR_get_physical_device_properties2: %d\n", VK_KHR_get_physical_device_properties2_enabled ? 1 : 0);
-        wprintf(L"VK_KHR_dedicated_allocation: %d\n", VK_KHR_dedicated_allocation_enabled ? 1 : 0);
-        wprintf(L"VK_KHR_bind_memory2: %d\n", VK_KHR_bind_memory2_enabled ? 1 : 0);
+        printf("VK_KHR_get_memory_requirements2: %d\n", VK_KHR_get_memory_requirements2_enabled ? 1 : 0);
+        printf("VK_KHR_get_physical_device_properties2: %d\n", VK_KHR_get_physical_device_properties2_enabled ? 1 : 0);
+        printf("VK_KHR_dedicated_allocation: %d\n", VK_KHR_dedicated_allocation_enabled ? 1 : 0);
+        printf("VK_KHR_bind_memory2: %d\n", VK_KHR_bind_memory2_enabled ? 1 : 0);
     }
-    wprintf(L"VK_EXT_memory_budget: %d\n", VK_EXT_memory_budget_enabled ? 1 : 0);
-    wprintf(L"VK_AMD_device_coherent_memory: %d\n", VK_AMD_device_coherent_memory_enabled ? 1 : 0);
-    wprintf(L"VK_KHR_buffer_device_address: %d\n", VK_KHR_buffer_device_address_enabled ? 1 : 0);
-    wprintf(L"VK_EXT_buffer_device_address: %d\n", VK_EXT_buffer_device_address_enabled ? 1 : 0);
+    printf("VK_EXT_memory_budget: %d\n", VK_EXT_memory_budget_enabled ? 1 : 0);
+    printf("VK_AMD_device_coherent_memory: %d\n", VK_AMD_device_coherent_memory_enabled ? 1 : 0);
 }
 
 void SetAllocatorCreateInfo(VmaAllocatorCreateInfo& outInfo)
@@ -1169,8 +1163,7 @@ void SetAllocatorCreateInfo(VmaAllocatorCreateInfo& outInfo)
         outInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT;
     }
 #if !defined(VMA_MEMORY_BUDGET) || VMA_MEMORY_BUDGET == 1
-    if(VK_EXT_memory_budget_enabled && (
-        GetVulkanApiVersion() >= VK_API_VERSION_1_1 || VK_KHR_get_physical_device_properties2_enabled))
+    if(VK_EXT_memory_budget_enabled && VK_KHR_get_physical_device_properties2_enabled)
     {
         outInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
     }
@@ -1178,10 +1171,6 @@ void SetAllocatorCreateInfo(VmaAllocatorCreateInfo& outInfo)
     if(VK_AMD_device_coherent_memory_enabled)
     {
         outInfo.flags |= VMA_ALLOCATOR_CREATE_AMD_DEVICE_COHERENT_MEMORY_BIT;
-    }
-    if(g_BufferDeviceAddressEnabled)
-    {
-        outInfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     }
 
     if(USE_CUSTOM_CPU_ALLOCATION_CALLBACKS)
@@ -1205,16 +1194,6 @@ void SetAllocatorCreateInfo(VmaAllocatorCreateInfo& outInfo)
     */
 }
 
-static void PrintPhysicalDeviceProperties(const VkPhysicalDeviceProperties& properties)
-{
-    wprintf(L"Physical device:\n");
-    wprintf(L"    Driver version: 0x%X\n", properties.driverVersion);
-    wprintf(L"    Vendor ID: 0x%X\n", properties.vendorID);
-    wprintf(L"    Device ID: 0x%X\n", properties.deviceID);
-    wprintf(L"    Device type: %u\n", properties.deviceType);
-    wprintf(L"    Device name: %hs\n", properties.deviceName);
-}
-
 static void InitializeApplication()
 {
     if(USE_CUSTOM_CPU_ALLOCATION_CALLBACKS)
@@ -1234,7 +1213,7 @@ static void InitializeApplication()
     {
         if(IsLayerSupported(instanceLayerProps.data(), instanceLayerProps.size(), VALIDATION_LAYER_NAME) == false)
         {
-            wprintf(L"Layer \"%hs\" not supported.", VALIDATION_LAYER_NAME);
+            printf("Layer \"%s\" not supported.", VALIDATION_LAYER_NAME);
             g_EnableValidationLayer = false;
         }
     }
@@ -1275,15 +1254,7 @@ static void InitializeApplication()
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "Adam Sawicki Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-#if VMA_VULKAN_VERSION == 1002000
-    appInfo.apiVersion = VK_API_VERSION_1_2;
-#elif VMA_VULKAN_VERSION == 1001000
-    appInfo.apiVersion = VK_API_VERSION_1_1;
-#elif VMA_VULKAN_VERSION == 1000000
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-#else
-    #error Invalid VMA_VULKAN_VERSION.
-#endif
+    appInfo.apiVersion = GetVulkanApiVersion();
 
     VkInstanceCreateInfo instInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     instInfo.pApplicationInfo = &appInfo;
@@ -1292,12 +1263,12 @@ static void InitializeApplication()
     instInfo.enabledLayerCount = static_cast<uint32_t>(instanceLayers.size());
     instInfo.ppEnabledLayerNames = instanceLayers.data();
 
-    wprintf(L"Vulkan API version: ");
+    printf("Vulkan API version: ");
     switch(appInfo.apiVersion)
     {
-    case VK_API_VERSION_1_0: wprintf(L"1.0\n"); break;
-    case VK_API_VERSION_1_1: wprintf(L"1.1\n"); break;
-    case VK_API_VERSION_1_2: wprintf(L"1.2\n"); break;
+    case VK_API_VERSION_1_0: printf("1.0\n"); break;
+    case VK_API_VERSION_1_1: printf("1.1\n"); break;
+    case VK_API_VERSION_1_2: printf("1.2\n"); break;
     default: assert(0);
     }
 
@@ -1324,7 +1295,7 @@ static void InitializeApplication()
 
     g_hPhysicalDevice = physicalDevices[0];
 
-    // Query for device extensions
+    // Query for extensions
 
     uint32_t physicalDeviceExtensionPropertyCount = 0;
     ERR_GUARD_VULKAN( vkEnumerateDeviceExtensionProperties(g_hPhysicalDevice, nullptr, &physicalDeviceExtensionPropertyCount, nullptr) );
@@ -1365,46 +1336,20 @@ static void InitializeApplication()
             VK_EXT_memory_budget_enabled = true;
         else if(strcmp(physicalDeviceExtensionProperties[i].extensionName, VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME) == 0)
             VK_AMD_device_coherent_memory_enabled = true;
-        else if(strcmp(physicalDeviceExtensionProperties[i].extensionName, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0)
-        {
-            if(GetVulkanApiVersion() < VK_API_VERSION_1_2)
-            {
-                VK_KHR_buffer_device_address_enabled = true;
-            }
-        }
-        else if(strcmp(physicalDeviceExtensionProperties[i].extensionName, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0)
-        {
-            if(GetVulkanApiVersion() < VK_API_VERSION_1_2)
-            {
-                VK_EXT_buffer_device_address_enabled = true;
-            }
-        }
     }
-
-    if(VK_EXT_buffer_device_address_enabled && VK_KHR_buffer_device_address_enabled)
-        VK_EXT_buffer_device_address_enabled = false;
 
     // Query for features
 
     VkPhysicalDeviceProperties physicalDeviceProperties = {};
     vkGetPhysicalDeviceProperties(g_hPhysicalDevice, &physicalDeviceProperties);
 
-    PrintPhysicalDeviceProperties(physicalDeviceProperties);
-
     VkPhysicalDeviceFeatures2 physicalDeviceFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-    
     VkPhysicalDeviceCoherentMemoryFeaturesAMD physicalDeviceCoherentMemoryFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD };
     if(VK_AMD_device_coherent_memory_enabled)
     {
-        PnextChainPushFront(&physicalDeviceFeatures, &physicalDeviceCoherentMemoryFeatures);
+        physicalDeviceCoherentMemoryFeatures.pNext = physicalDeviceFeatures.pNext;
+        physicalDeviceFeatures.pNext = &physicalDeviceCoherentMemoryFeatures;
     }
-    
-    VkPhysicalDeviceBufferDeviceAddressFeaturesEXT physicalDeviceBufferDeviceAddressFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT };
-    if(VK_KHR_buffer_device_address_enabled || VK_EXT_buffer_device_address_enabled || GetVulkanApiVersion() >= VK_API_VERSION_1_2)
-    {
-        PnextChainPushFront(&physicalDeviceFeatures, &physicalDeviceBufferDeviceAddressFeatures);
-    }
-
     vkGetPhysicalDeviceFeatures2(g_hPhysicalDevice, &physicalDeviceFeatures);
 
     g_SparseBindingEnabled = physicalDeviceFeatures.features.sparseBinding != 0;
@@ -1412,8 +1357,6 @@ static void InitializeApplication()
     // The extension is supported as fake with no real support for this feature? Don't use it.
     if(VK_AMD_device_coherent_memory_enabled && !physicalDeviceCoherentMemoryFeatures.deviceCoherentMemory)
         VK_AMD_device_coherent_memory_enabled = false;
-    if(VK_KHR_buffer_device_address_enabled || VK_EXT_buffer_device_address_enabled || GetVulkanApiVersion() >= VK_API_VERSION_1_2)
-        g_BufferDeviceAddressEnabled = physicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddress != VK_FALSE;
 
     // Find queue family index
 
@@ -1490,12 +1433,6 @@ static void InitializeApplication()
         ++queueCount;
     }
 
-    VkPhysicalDeviceFeatures deviceFeatures = {};
-    //deviceFeatures.fillModeNonSolid = VK_TRUE;
-    deviceFeatures.samplerAnisotropy = VK_TRUE;
-    deviceFeatures.sparseBinding = g_SparseBindingEnabled ? VK_TRUE : VK_FALSE;
-
-    // Determine list of device extensions to enable.
     std::vector<const char*> enabledDeviceExtensions;
     enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     if(VK_KHR_get_memory_requirements2_enabled)
@@ -1508,129 +1445,33 @@ static void InitializeApplication()
         enabledDeviceExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     if(VK_AMD_device_coherent_memory_enabled)
         enabledDeviceExtensions.push_back(VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME);
-    if(VK_KHR_buffer_device_address_enabled)
-        enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    if(VK_EXT_buffer_device_address_enabled)
-        enabledDeviceExtensions.push_back(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
 
-        if(propertyCount)
-        {
-            std::vector<VkExtensionProperties> properties{propertyCount};
-            ERR_GUARD_VULKAN( vkEnumerateDeviceExtensionProperties(g_hPhysicalDevice, nullptr, &propertyCount, properties.data()) );
+    VkPhysicalDeviceFeatures2 deviceFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    deviceFeatures.features.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.features.sparseBinding = g_SparseBindingEnabled ? VK_TRUE : VK_FALSE;
 
     if(VK_AMD_device_coherent_memory_enabled)
     {
+        physicalDeviceCoherentMemoryFeatures.pNext = deviceFeatures.pNext;
+        deviceFeatures.pNext = &physicalDeviceCoherentMemoryFeatures;
         physicalDeviceCoherentMemoryFeatures.deviceCoherentMemory = VK_TRUE;
-        PnextChainPushBack(&deviceFeatures, &physicalDeviceCoherentMemoryFeatures);
-    }
-    if(g_BufferDeviceAddressEnabled)
-    {
-        physicalDeviceBufferDeviceAddressFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT };
-        physicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
-        PnextChainPushBack(&deviceFeatures, &physicalDeviceBufferDeviceAddressFeatures);
     }
 
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    deviceCreateInfo.pNext = &deviceFeatures;
     deviceCreateInfo.enabledLayerCount = 0;
     deviceCreateInfo.ppEnabledLayerNames = nullptr;
     deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledDeviceExtensions.size();
     deviceCreateInfo.ppEnabledExtensionNames = !enabledDeviceExtensions.empty() ? enabledDeviceExtensions.data() : nullptr;
     deviceCreateInfo.queueCreateInfoCount = queueCount;
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfo;
-    deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
     ERR_GUARD_VULKAN( vkCreateDevice(g_hPhysicalDevice, &deviceCreateInfo, g_Allocs, &g_hDevice) );
-
-    // Fetch pointers to extension functions
-    if(g_BufferDeviceAddressEnabled)
-    {
-        if(GetVulkanApiVersion() >= VK_API_VERSION_1_2)
-        {
-            g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetDeviceProcAddr(g_hDevice, "vkGetBufferDeviceAddress");
-            //assert(g_vkGetBufferDeviceAddressEXT != nullptr);
-            /*
-            For some reason this doesn't work, the pointer is NULL :( None of the below methods help.
-
-            Validation layers also report following error:
-            [ VUID-VkMemoryAllocateInfo-flags-03331 ] Object: VK_NULL_HANDLE (Type = 0) | If VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR is set, bufferDeviceAddress must be enabled. The Vulkan spec states: If VkMemoryAllocateFlagsInfo::flags includes VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, the bufferDeviceAddress feature must be enabled (https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#VUID-VkMemoryAllocateInfo-flags-03331)
-            Despite I'm posting VkPhysicalDeviceBufferDeviceAddressFeaturesEXT::bufferDeviceAddress = VK_TRUE in VkDeviceCreateInfo::pNext chain.
-
-            if(g_vkGetBufferDeviceAddressEXT == nullptr)
-            {
-                g_vkGetBufferDeviceAddressEXT = &vkGetBufferDeviceAddress; // Doesn't run, cannot find entry point...
-            }
-
-            if(g_vkGetBufferDeviceAddressEXT == nullptr)
-            {
-                g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetInstanceProcAddr(g_hVulkanInstance, "vkGetBufferDeviceAddress");
-            }
-            if(g_vkGetBufferDeviceAddressEXT == nullptr)
-            {
-                g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetDeviceProcAddr(g_hDevice, "vkGetBufferDeviceAddressKHR");
-            }
-            if(g_vkGetBufferDeviceAddressEXT == nullptr)
-            {
-                g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetDeviceProcAddr(g_hDevice, "vkGetBufferDeviceAddressEXT");
-            }
-            */
-        }
-        else if(VK_KHR_buffer_device_address_enabled)
-        {
-            g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetDeviceProcAddr(g_hDevice, "vkGetBufferDeviceAddressKHR");
-            assert(g_vkGetBufferDeviceAddressEXT != nullptr);
-        }
-        else if(VK_EXT_buffer_device_address_enabled)
-        {
-            g_vkGetBufferDeviceAddressEXT = (PFN_vkGetBufferDeviceAddressEXT)vkGetDeviceProcAddr(g_hDevice, "vkGetBufferDeviceAddressEXT");
-            assert(g_vkGetBufferDeviceAddressEXT != nullptr);
-        }
-    }
 
     // Create memory allocator
 
     VmaAllocatorCreateInfo allocatorInfo = {};
-    allocatorInfo.physicalDevice = g_hPhysicalDevice;
-    allocatorInfo.device = g_hDevice;
-    allocatorInfo.instance = g_hVulkanInstance;
-    allocatorInfo.vulkanApiVersion = appInfo.apiVersion;
-
-    if(VK_KHR_dedicated_allocation_enabled)
-    {
-        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
-    }
-    if(VK_KHR_bind_memory2_enabled)
-    {
-        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT;
-    }
-#if !defined(VMA_MEMORY_BUDGET) || VMA_MEMORY_BUDGET == 1
-    if(VK_EXT_memory_budget_enabled && VK_KHR_get_physical_device_properties2_enabled)
-    {
-        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
-    }
-#endif
-
-    if(USE_CUSTOM_CPU_ALLOCATION_CALLBACKS)
-    {
-        allocatorInfo.pAllocationCallbacks = &g_CpuAllocationCallbacks;
-    }
-
-    // Uncomment to enable recording to CSV file.
-    /*
-    {
-        VmaRecordSettings recordSettings = {};
-        recordSettings.pFilePath = "VulkanSample.csv";
-        allocatorInfo.pRecordSettings = &recordSettings;
-    }
-    */
-
-    // Uncomment to enable HeapSizeLimit.
-    /*
-    std::array<VkDeviceSize, VK_MAX_MEMORY_HEAPS> heapSizeLimit;
-    std::fill(heapSizeLimit.begin(), heapSizeLimit.end(), VK_WHOLE_SIZE);
-    heapSizeLimit[0] = 512ull * 1024 * 1024;
-    allocatorInfo.pHeapSizeLimit = heapSizeLimit.data();
-    */
-
+    SetAllocatorCreateInfo(allocatorInfo);
     ERR_GUARD_VULKAN( vmaCreateAllocator(&allocatorInfo, &g_hAllocator) );
 
     PrintEnabledFeatures();
