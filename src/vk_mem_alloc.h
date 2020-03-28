@@ -2882,6 +2882,25 @@ VMA_CALL_PRE void VMA_CALL_POST vmaMakePoolAllocationsLost(
     VmaPool pool,
     size_t* pLostAllocationCount);
 
+
+/** \brief Reset the allocations in the given pool for all blocks. If the blocks are mapped, the map count is reset to 1 
+
+@param allocator Allocator object.
+@param pool Pool.
+*/
+VMA_CALL_PRE void VMA_CALL_POST vmaResetPool(
+    VmaAllocator allocator,
+    VmaPool pool);
+
+/** \brief Removes 1 from map count on all blocks in the pool, and unmaps if the map count goes to zero.
+
+@param allocator Allocator object.
+@param pool Pool.
+*/
+VMA_CALL_PRE void VMA_CALL_POST vmaForceUnmapPool(
+    VmaAllocator allocator,
+    VmaPool pool);
+
 /** \brief Checks magic number in margins around all allocations in given memory pool in search for corruptions.
 
 Corruption detection is enabled only when `VMA_DEBUG_DETECT_CORRUPTION` macro is defined to nonzero,
@@ -5879,6 +5898,7 @@ public:
     // Frees suballocation assigned to given memory region.
     virtual void Free(const VmaAllocation allocation) = 0;
     virtual void FreeAtOffset(VkDeviceSize offset) = 0;
+    virtual void FreeAll() { VMA_ASSERT(0); };
 
 protected:
     const VkAllocationCallbacks* GetAllocationCallbacks() const { return m_pAllocationCallbacks; }
@@ -6135,7 +6155,7 @@ public:
 
     virtual void Free(const VmaAllocation allocation);
     virtual void FreeAtOffset(VkDeviceSize offset);
-
+    virtual void FreeAll();
 private:
     /*
     There are two suballocation vectors, used in ping-pong way.
@@ -6397,6 +6417,7 @@ public:
     // ppData can be null.
     VkResult Map(VmaAllocator hAllocator, uint32_t count, void** ppData);
     void Unmap(VmaAllocator hAllocator, uint32_t count);
+    void SetMapCount(VmaAllocator hAllocator, uint32_t count);
 
     VkResult WriteMagicValueAroundAllocation(VmaAllocator hAllocator, VkDeviceSize allocOffset, VkDeviceSize allocSize);
     VkResult ValidateMagicValueAroundAllocation(VmaAllocator hAllocator, VkDeviceSize allocOffset, VkDeviceSize allocSize);
@@ -11034,6 +11055,20 @@ void VmaBlockMetadata_Linear::FreeAtOffset(VkDeviceSize offset)
     VMA_ASSERT(0 && "Allocation to free not found in linear allocator!");
 }
 
+void VmaBlockMetadata_Linear::FreeAll() {
+    SuballocationVectorType& suballocations1st = AccessSuballocations1st();
+    SuballocationVectorType& suballocations2nd = AccessSuballocations2nd();
+
+	suballocations1st.clear();
+	suballocations2nd.clear();
+	m_1stNullItemsBeginCount = 0;
+	m_1stNullItemsMiddleCount = 0;
+	m_2ndNullItemsCount = 0;
+	m_2ndVectorMode = SECOND_VECTOR_EMPTY;
+
+    VMA_HEAVY_ASSERT(Validate());
+}
+
 bool VmaBlockMetadata_Linear::ShouldCompact1st() const
 {
     const size_t nullItemCount = m_1stNullItemsBeginCount + m_1stNullItemsMiddleCount;
@@ -11857,6 +11892,15 @@ void VmaDeviceMemoryBlock::Unmap(VmaAllocator hAllocator, uint32_t count)
     else
     {
         VMA_ASSERT(0 && "VkDeviceMemory block is being unmapped while it was not previously mapped.");
+    }
+}
+
+void VmaDeviceMemoryBlock::SetMapCount(VmaAllocator hAllocator, uint32_t count) {
+    VmaMutexLock lock(m_Mutex, hAllocator->m_UseMutex);
+    if (m_MapCount > 0) {
+        m_MapCount = count;
+    } else {
+		VMA_ASSERT(0 && "Map count set on VkDeviceMemory block while it was not previously mapped.");
     }
 }
 
@@ -17475,6 +17519,40 @@ VMA_CALL_PRE void VMA_CALL_POST vmaMakePoolAllocationsLost(
 
     allocator->MakePoolAllocationsLost(pool, pLostAllocationCount);
 }
+
+VMA_CALL_PRE void VMA_CALL_POST vmaResetPool(
+    VmaAllocator allocator,
+    VmaPool pool) {
+    VMA_ASSERT(allocator && pool);
+
+    VMA_DEBUG_GLOBAL_MUTEX_LOCK
+    
+	auto& block_vector = pool->m_BlockVector;
+	for (auto i = 0; i < block_vector.GetBlockCount(); i++) {
+		auto& block = *block_vector.GetBlock(i);
+        auto count = block.m_pMetadata->GetAllocationCount();
+		block.m_pMetadata->FreeAll();
+        if(block.GetMappedData() != nullptr)
+            block.SetMapCount(allocator, 1);
+	}
+}
+
+VMA_CALL_PRE void VMA_CALL_POST vmaForceUnmapPool(
+    VmaAllocator allocator,
+    VmaPool pool) {
+    VMA_ASSERT(allocator && pool);
+
+    VMA_DEBUG_GLOBAL_MUTEX_LOCK
+    
+	auto& block_vector = pool->m_BlockVector;
+	for (auto i = 0; i < block_vector.GetBlockCount(); i++) {
+		auto& block = *block_vector.GetBlock(i);
+		if (block.GetMappedData() != nullptr)
+			block.Unmap(allocator, 1);
+	}
+}
+
+
 
 VMA_CALL_PRE VkResult VMA_CALL_POST vmaCheckPoolCorruption(VmaAllocator allocator, VmaPool pool)
 {
