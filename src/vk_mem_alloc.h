@@ -5869,6 +5869,7 @@ public:
 
     virtual void Free(const VmaAllocation allocation);
     virtual void FreeAtOffset(VkDeviceSize offset);
+    virtual void FreeAll();
 
     ////////////////////////////////////////////////////////////////////////////////
     // For defragmentation
@@ -8860,6 +8861,13 @@ void VmaBlockMetadata_Generic::FreeAtOffset(VkDeviceSize offset)
         }
     }
     VMA_ASSERT(0 && "Not found!");
+}
+
+void VmaBlockMetadata_Generic::FreeAll() {
+    m_Suballocations.clear();
+    m_Suballocations.push_back({});
+    m_FreeCount = 1;
+    VMA_HEAVY_ASSERT(Validate());
 }
 
 bool VmaBlockMetadata_Generic::ValidateFreeSuballocationList() const
