@@ -15869,7 +15869,7 @@ VkResult VmaAllocator_T::AllocateMemory(
 {
     memset(pAllocations, 0, sizeof(VmaAllocation) * allocationCount);
 
-    VMA_ASSERT(VmaIsPow2(vkMemReq.alignment));
+    //VMA_ASSERT(VmaIsPow2(vkMemReq.alignment));
 
     if(vkMemReq.size == 0)
     {
